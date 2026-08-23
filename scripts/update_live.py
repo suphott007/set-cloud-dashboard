@@ -22,9 +22,27 @@ def num(s):
     try:return float(str(s).replace(',','').replace('+','').strip())
     except:return None
 
+def extract_date(text):
+    m = re.search(r'(?:ข้อมูลล่าสุด|Last Update)\s*[:]?\s*(\d{1,2})\s+([ก-๙a-zA-Z\.]+)\s+(\d{4})', text)
+    if m:
+        d, mth, y = m.groups()
+        y = int(y)
+        if y > 2500: y -= 543
+        months = {'ม.ค.':1, 'ก.พ.':2, 'มี.ค.':3, 'เม.ย.':4, 'พ.ค.':5, 'มิ.ย.':6, 'ก.ค.':7, 'ส.ค.':8, 'ก.ย.':9, 'ต.ค.':10, 'พ.ย.':11, 'ธ.ค.':12,
+                  'Jan':1, 'Feb':2, 'Mar':3, 'Apr':4, 'May':5, 'Jun':6, 'Jul':7, 'Aug':8, 'Sep':9, 'Oct':10, 'Nov':11, 'Dec':12}
+        m_num = next((v for k,v in months.items() if mth.startswith(k)), None)
+        if m_num:
+            return f"{y:04d}-{m_num:02d}-{int(d):02d}"
+    return None
+
 def find_field(text,label):
-    # broad, tolerant label matcher; validates values before accepting snapshot
-    pats=[rf'{re.escape(label)}\s*[:]?\s*(-?\d[\d,]*(?:\.\d+)?)',rf'\b{re.escape(label)}\b[^0-9-]*(-?\d[\d,]*(?:\.\d+)?)']
+    if label in ('Last', 'ล่าสุด'):
+        # avoid matching ข้อมูลล่าสุด
+        m = re.search(r'(?<!ข้อมูล)ล่าสุด\s*(-?\d[\d,]*(?:\.\d+)?)|Last[^a-zA-Z]*(-?\d[\d,]*(?:\.\d+)?)', text)
+        if m:
+            v = num(m.group(1)) if m.group(1) else num(m.group(2))
+            if v is not None: return v
+    pats=[rf'{re.escape(label)}\s*[:]?\s*(-?\d[\d,]*(?:\.\d+)?)',rf'(?:\b|\W){re.escape(label)}(?:\b|\W)[^0-9-]*(-?\d[\d,]*(?:\.\d+)?)']
     for p in pats:
         m=re.search(p,text,re.I)
         if m:
@@ -43,8 +61,17 @@ def parse_page(symbol,url,source):
         vals[k]=next((v for lab in labels if (v:=find_field(text,lab)) is not None),None)
     if any(vals[k] is None for k in vals):
         raise ValueError(f'incomplete {source}: {vals}')
+    
+    if not (vals['Low'] <= vals['Close'] <= vals['High']):
+        raise ValueError(f"Validation failed: Close {vals['Close']} out of range [{vals['Low']}, {vals['High']}]")
+    if any(vals[k] < 0 for k in vals):
+        raise ValueError(f"Validation failed: negative values found")
+    
+    dt = extract_date(text)
     now=datetime.now(BKK)
-    return Quote(symbol,now.date().isoformat(),vals['Open'],vals['High'],vals['Low'],vals['Close'],vals['Volume'],source,url,now.isoformat(timespec='seconds'))
+    if dt is None: dt = now.date().isoformat()
+    
+    return Quote(symbol,dt,vals['Open'],vals['High'],vals['Low'],vals['Close'],vals['Volume'],source,url,now.isoformat(timespec='seconds'))
 
 def fetch(symbol):
     urls=[(SET_TMPL.format(symbol=symbol),'SET'),(SETTRADE_TMPL.format(symbol=symbol),'SETTRADE')]
