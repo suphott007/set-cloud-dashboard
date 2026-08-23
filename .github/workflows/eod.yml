@@ -1,0 +1,25 @@
+name: SET EOD finalize pilot
+on:
+  workflow_dispatch:
+  schedule:
+    # 17:15 Bangkok = 10:15 UTC
+    - cron: '15 10 * * 1-5'
+permissions:
+  contents: write
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python scripts/eod_finalize.py
+      - name: Commit finalized daily bars
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/data/history docs/data/live.json
+          git diff --cached --quiet && exit 0
+          git commit -m "data: finalize SET EOD pilot"
+          git push
