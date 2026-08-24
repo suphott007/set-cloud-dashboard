@@ -14,5 +14,34 @@ render(live={},fit=false){let rows=[...(this.history||[])];let q=live.quotes?.[t
 async load(){try{let h=await getJSON(`data/history/${this.sym}.json`);this.history=h.rows||[];let live={};try{live=await getJSON('data/live.json')}catch{}this.render(live,true)}catch(e){this.q.textContent='NO DATA';this.stamp.textContent=e.message}}
 applyLive(live){try{this.render(live,false)}catch(e){this.stamp.textContent=e.message}}
 }
-(async()=>{try{let s=await getJSON('data/symbols.json');symbols=s.symbols||[]}catch{}document.querySelector('#symbols').innerHTML=symbols.map(x=>`<option value="${x}">`).join('');let saved=JSON.parse(localStorage.getItem('cloud4')||'null')||defaults;let ps=saved.map((s,i)=>new Panel(i,s));window.addEventListener('beforeunload',()=>localStorage.setItem('cloud4',JSON.stringify(ps.map(x=>x.sym))));let lastUpdated='';async function pollLive(){let st=document.getElementById('autostatus');try{let live=await getJSON('data/live.json');let u=live.updatedAt||'';if(u&&u!==lastUpdated){ps.forEach(p=>p.applyLive(live));lastUpdated=u;st.textContent=`AUTO • ${u.slice(11,16)||'updated'}`}else{st.textContent=`AUTO 60s • ${new Date().toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'})}`}}catch(e){st.textContent='AUTO • OFFLINE'}}setTimeout(pollLive,5000);setInterval(pollLive,60000)})();
+(async()=>{try{let s=await getJSON('data/symbols.json');symbols=s.symbols||[]}catch{}document.querySelector('#symbols').innerHTML=symbols.map(x=>`<option value="${x}">`).join('');let saved=JSON.parse(localStorage.getItem('cloud4')||'null')||defaults;let ps=saved.map((s,i)=>new Panel(i,s));window.addEventListener('beforeunload',()=>localStorage.setItem('cloud4',JSON.stringify(ps.map(x=>x.sym))));let lastUpdated='';async function pollLive(){
+  let st=document.getElementById('autostatus');
+  try{
+    let live=await getJSON('data/live.json');
+    let u=live.updatedAt||'';
+    let ageStr = '';
+    let isStale = false;
+    if (u) {
+      let updatedTime = new Date(u).getTime();
+      let ageMin = Math.round((Date.now() - updatedTime) / 60000);
+      if (ageMin < 0) ageMin = 0;
+      ageStr = `DATA AGE: ${ageMin} min`;
+      if (ageMin > 10) isStale = true;
+    }
+    
+    if(u&&u!==lastUpdated){
+      ps.forEach(p=>p.applyLive(live));
+      lastUpdated=u;
+    }
+    
+    let uTime = u ? u.slice(11,16) : 'N/A';
+    if (isStale) {
+      st.innerHTML = `<span style="color:#ef5350;font-weight:bold;">STALE DATA</span> • SOURCE UPDATED: ${uTime} • ${ageStr}`;
+    } else {
+      st.innerHTML = `AUTO 60s • SOURCE UPDATED: ${uTime} • ${ageStr}`;
+    }
+  }catch(e){
+    st.textContent='AUTO • OFFLINE';
+  }
+}setTimeout(pollLive,5000);setInterval(pollLive,60000)})();
 </script></body></html>
