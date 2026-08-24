@@ -37,12 +37,19 @@ def extract_date(text):
 
 def find_field(text,label):
     if label in ('Last', 'ล่าสุด'):
-        # avoid matching ข้อมูลล่าสุด
         m = re.search(r'(?<!ข้อมูล)ล่าสุด\s*(-?\d[\d,]*(?:\.\d+)?)|Last[^a-zA-Z]*(-?\d[\d,]*(?:\.\d+)?)', text)
         if m:
             v = num(m.group(1)) if m.group(1) else num(m.group(2))
             if v is not None: return v
-    pats=[rf'{re.escape(label)}\s*[:]?\s*(-?\d[\d,]*(?:\.\d+)?)',rf'(?:\b|\W){re.escape(label)}(?:\b|\W)[^0-9-]*(-?\d[\d,]*(?:\.\d+)?)']
+    
+    # Use the robust regex from set_live.py:
+    labels = r"Change|High|High 52|Low|Low 52|Prior|Open|Volume \(Shares\)|Volume \(Units\)|Value|Average Price|Par|Floor|Ceiling|Bid|Offer|ปริมาณ|มูลค่า|ราคาเปิด|ราคาสูงสุด|ราคาต่ำสุด|ราคาปิดก่อนหน้า"
+    m = re.search(rf"\b{re.escape(label)}\s+(-?[+]?\d[\d,]*(?:\.\d+)?)\s*(?=(?:{labels})(?:\b|\W)|$)", text, re.I)
+    if m:
+        return num(m.group(1))
+        
+    # fallback to exact label with colon (for older html formats)
+    pats=[rf'\b{re.escape(label)}\b\s*[:]?\s*(-?\d[\d,]*(?:\.\d+)?)',rf'(?:\b|\W){re.escape(label)}(?:\b|\W)[^0-9-]*(-?\d[\d,]*(?:\.\d+)?)']
     for p in pats:
         m=re.search(p,text,re.I)
         if m:
@@ -53,17 +60,25 @@ def find_field(text,label):
 def parse_page(symbol,url,source):
     r=requests.get(url,headers=HEADERS,timeout=15); r.raise_for_status()
     text=' '.join(BeautifulSoup(r.text,'html.parser').stripped_strings)
+    
+    # Strip everything before Price Info to avoid matching Status : Open1 etc.
+    price_text = text.split("Price Info", 1)[1] if "Price Info" in text else text
+    price_text = price_text.split("ข้อมูลล่าสุด", 1)[1] if "ข้อมูลล่าสุด" in price_text else price_text
+    
     aliases={
       'Open':['Open','ราคาเปิด'], 'High':['High','สูงสุด'], 'Low':['Low','ต่ำสุด'],
       'Close':['Last','ล่าสุด'], 'Volume':['Volume (Shares)','Volume (Units)','ปริมาณ (หุ้น)','ปริมาณ']}
     vals={}
     for k,labels in aliases.items():
-        vals[k]=next((v for lab in labels if (v:=find_field(text,lab)) is not None),None)
+        vals[k]=next((v for lab in labels if (v:=find_field(price_text,lab)) is not None),None)
+        
     if any(vals[k] is None for k in vals):
         raise ValueError(f'incomplete {source}: {vals}')
     
     if not (vals['Low'] <= vals['Close'] <= vals['High']):
         raise ValueError(f"Validation failed: Close {vals['Close']} out of range [{vals['Low']}, {vals['High']}]")
+    if not (vals['Low'] <= vals['Open'] <= vals['High']):
+        raise ValueError(f"Validation failed: Open {vals['Open']} out of range [{vals['Low']}, {vals['High']}]")
     if any(vals[k] < 0 for k in vals):
         raise ValueError(f"Validation failed: negative values found")
     
